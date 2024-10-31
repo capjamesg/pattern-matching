@@ -4,10 +4,8 @@ from collections import defaultdict, Counter, OrderedDict
 SUBPATH = "train"
 DELIMITER = "-"
 
-def get_patterns(delimiter = "-"):
-    url_components = [r.split(delimiter) for r in urls]
-
-    longest_url = max(url_components, key=len)
+def get_patterns(examples, delimiter = "-"):
+    url_components = [r.split(delimiter) for r in examples]
 
     patterns = [["*" for _ in range(len(url))] for url in url_components]
     patterns = set(map(tuple, patterns))
@@ -57,7 +55,7 @@ def get_patterns(delimiter = "-"):
             pattern = ["*"]
             break
         
-        pattern = [word if (total_sequences[word] / len(urls))
+        pattern = [word if (total_sequences[word] / len(examples))
                     > threshold
                     else "*" for word in main_pattern]
 
@@ -95,9 +93,19 @@ def calculate_matches_from_examples(pattern, examples, delimiter = "-"):
 
     for example in examples:
         match = re.search(pattern, example)
+
         if match:
             for i, group in enumerate(match.groups()):
                 values_by_wildcard_idx[i][group] += 1
             matches += 1
+
+    value_types_by_wildcard_idx = defaultdict(set)
+
+    for i, values in values_by_wildcard_idx.items():
+        for value in values:
+            if value.isdigit():
+                value_types_by_wildcard_idx[i].add(int)
+            else:
+                value_types_by_wildcard_idx[i].add(type(value))
 
     return matches, values_by_wildcard_idx
