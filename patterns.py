@@ -84,7 +84,7 @@ def get_patterns(examples, delimiter = "-"):
     return candidates
 
 def calculate_matches_from_examples(pattern, examples, delimiter = "-"):
-    pattern = delimiter.join([f"{word}" if word != "*" else "(.*)" for word in top_candidate]).strip()
+    pattern = delimiter.join([f"{word}" if word != "*" else "(.*)" for word in pattern]).strip()
 
     pattern = re.compile(pattern)
     matches = 0
