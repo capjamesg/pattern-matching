@@ -133,7 +133,7 @@ def get_patterns(examples, delimiter="-"):
 
                 # get all special characters in all values
                 special_chars = [
-                    [c for c in url_components[x][i][len(start) :] if not c.isalnum()]
+                    [c for c in url_components[x][i][len(start) :] if len(url_components[x]) > i and not c.isalnum()]
                     for x in range(len(url_components))
                 ]
                 special_chars = [c for sublist in special_chars for c in sublist]
