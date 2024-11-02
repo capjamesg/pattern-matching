@@ -78,15 +78,24 @@ def get_patterns(examples, delimiter="-"):
             continue
 
         triggered_regex = False
+        # if all in url components at idx are same length, add {n} to end
+        component_lens = set()
+
+        for url in url_components:
+            component_lens.add(len(url[0]))
+
 
         for i, item in enumerate(pattern):
             if "*" in item:
+                if i > min(url_length_counter.keys()):
+                    pattern[i] = "(.*)"
+                    continue
+
                 triggered_regex = True
                 start = []
 
                 pattern[i] = ""
-                # if all in url components at idx are same length, add {n} to end
-                component_lens = set(map(len, [url[i] for url in url_components]))
+                print(url_components)
                 # if all values are a-z
                 matcher = ""
                 # min is smallest in a-z order, max is largest
