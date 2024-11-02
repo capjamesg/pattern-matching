@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pattern Matching</title>
+
+    <link rel="icon" href="https://jamesg.blog/assets/favicon.ico" type="image/x-icon">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=PT+Serif:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&display=swap" rel="stylesheet">
+
+    <meta name="robots" content="noindex">
+
+    <script>
+        /*
+* This content is licensed according to the W3C Software License at
+* https://www.w3.org/Consortium/Legal/2015/copyright-software-and-document
+* Heavily modified to web component by Zach Leatherman
+*/
+class SevenMinuteTabs extends HTMLElement {
+  static tagName = "seven-minute-tabs";
+
+  static attrs = {
+    persist: "persist",
+    persistGroupKey: "data-tabs-persist",
+    prune: "prune",
+    sync: "sync",
+  };
+
+  static props = {
+    groupStorageKey: "seven-minute-tabs-persist-tabs",
+  };
+
+  static keys = {
+    end: 35,
+    home: 36,
+    left: 37,
+    up: 38,
+    right: 39,
+    down: 40
+  };
+
+  // Add or substract depending on key pressed
+  static direction = {
+    37: -1,
+    38: -1,
+    39: 1,
+    40: 1
+  };
+
+  constructor() {
+    super();
+
+    this._init = this._init.bind(this);
+    this._observer = new MutationObserver(this._init);
+  }
+
+  get storage() {
+    if(this.persistSelection === "session") {
+      return sessionStorage;
+    } else if(this.persistSelection) {
+      return localStorage;
+    }
+
+    // noop
+    return {
+      getItem() {},
+      setItem() {},
+    };
+  }
+
+  get persistSelection() {
+    if(!("_persist" in this)) {
+      this._persist = false;
+      if(this.hasAttribute(SevenMinuteTabs.attrs.persist)) {
+        this._persist = this.getAttribute(SevenMinuteTabs.attrs.persist) || true;
+      }
+    }
+    return this._persist;
+  }
+
+  connectedCallback() {
+    if (this.children.length) {
+      this._init();
+    }
+    this._observer.observe(this, { childList: true });
+  }
+
+  _init() {
+    this.tablist = this.querySelector('[role="tablist"]');
+    this.buttons = this.querySelectorAll('[role="tab"]');
+    this.panels = this.querySelectorAll('[role="tabpanel"]');
+    this.delay = this.determineDelay();
+
+    if(this.hasAttribute(SevenMinuteTabs.attrs.prune)) {
+      for(let button of this.buttons) {
+        if(!this.querySelector(button.getAttribute("href"))) {
+          (button.closest("li") || button)?.remove();
+        }
+      }
+    }
+
+    if(!this.tablist || !this.buttons.length || !this.panels.length) {
+      return;
+    }
+
+    // This order is important
+    this.initButtons();
+    this.initPanels();
+  }
+
+  getTabIdFromHref(hash) {
+    let index = hash.indexOf("#");
+    if(index > -1) {
+      return hash.substr(index + 1);
+    }
+    return hash;
+  }
+
+  getButtonIdFromTabId(tabId) {
+    return `${tabId}-btn`;
+  }
+
+  initButtons() {
+    let count = 0;
+    let hasASelectedButton = false;
+
+    if(this.persistSelection) {
+      let persisted = JSON.parse(this.storage.getItem(SevenMinuteTabs.props.groupStorageKey));
+      if(persisted) {
+        for(let button of this.buttons) {
+          let [key, value] = this.getStorageValues(button);
+          if(key && value && value == persisted[key]) {
+            button.setAttribute("aria-selected", "true");
+            hasASelectedButton = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if(!hasASelectedButton) {
+      hasASelectedButton = Array.from(this.buttons).filter(btn => btn.getAttribute("aria-selected") === "true").length > 0;
+    }
+
+    for(let button of this.buttons) {
+      let isSelected = button.getAttribute("aria-selected") === "true";
+      if(!hasASelectedButton && count === 0) {
+        isSelected = true;
+      }
+
+      // Attributes
+      if(!button.hasAttribute("aria-selected")) {
+        button.setAttribute("aria-selected", isSelected);
+      }
+      button.setAttribute("tabindex", isSelected ? "0" : "-1");
+
+      let tabId = this.getTabIdFromHref(button.getAttribute("href"));
+      if(!button.hasAttribute("aria-controls")) {
+        button.setAttribute("aria-controls", tabId);
+      }
+      if(!button.hasAttribute("id")) {
+        button.setAttribute("id", this.getButtonIdFromTabId(tabId));
+      }
+
+      // Events
+      button.addEventListener('click', this.clickEventListener.bind(this));
+      button.addEventListener('keydown', this.keydownEventListener.bind(this));
+      button.addEventListener('keyup', this.keyupEventListener.bind(this));
+
+      button.index = count++;
+    }
+  }
+
+  initPanels() {
+    let selectedPanelId = this.querySelector('[role="tab"][aria-selected="true"]').getAttribute("aria-controls");
+    for(let panel of this.panels) {
+      if(panel.getAttribute("id") !== selectedPanelId) {
+        panel.setAttribute("hidden", "");
+      }
+      panel.setAttribute("tabindex", "0");
+
+      if(!panel.hasAttribute("aria-labelledby")) {
+        let tabId = panel.getAttribute("id");
+        panel.setAttribute("aria-labelledby", this.getButtonIdFromTabId(tabId));
+      }
+    }
+  }
+
+  clickEventListener(event) {
+    let button = event.target;
+    if(button.tagName === "A" || button.tagName === "BUTTON" && button.getAttribute("type") === "submit") {
+      event.preventDefault();
+    }
+
+    this.activateTab(button, false);
+  }
+
+  // Handle keydown on tabs
+  keydownEventListener(event) {
+    var key = event.keyCode;
+
+    switch (key) {
+      case SevenMinuteTabs.keys.end:
+        event.preventDefault();
+        // Activate last tab
+        this.activateTab(this.buttons[this.buttons.length - 1]);
+        break;
+      case SevenMinuteTabs.keys.home:
+        event.preventDefault();
+        // Activate first tab
+        this.activateTab(this.buttons[0]);
+        break;
+
+      // Up and down are in keydown
+      // because we need to prevent page scroll >:)
+      case SevenMinuteTabs.keys.up:
+      case SevenMinuteTabs.keys.down:
+        this.determineOrientation(event);
+        break;
+    };
+  }
+
+  // Handle keyup on tabs
+  keyupEventListener(event) {
+    var key = event.keyCode;
+
+    switch (key) {
+      case SevenMinuteTabs.keys.left:
+      case SevenMinuteTabs.keys.right:
+        this.determineOrientation(event);
+        break;
+    };
+  }
+
+  // When a tablist’s aria-orientation is set to vertical,
+  // only up and down arrow should function.
+  // In all other cases only left and right arrow function.
+  determineOrientation(event) {
+    var key = event.keyCode;
+    var vertical = this.tablist.getAttribute('aria-orientation') == 'vertical';
+    var proceed = false;
+
+    if (vertical) {
+      if (key === SevenMinuteTabs.keys.up || key === SevenMinuteTabs.keys.down) {
+        event.preventDefault();
+        proceed = true;
+      };
+    }
+    else {
+      if (key === SevenMinuteTabs.keys.left || key === SevenMinuteTabs.keys.right) {
+        proceed = true;
+      };
+    };
+
+    if (proceed) {
+      this.switchTabOnArrowPress(event);
+    };
+  }
+
+  // Either focus the next, previous, first, or last tab
+  // depending on key pressed
+  switchTabOnArrowPress(event) {
+    var pressed = event.keyCode;
+
+    for (let button of this.buttons) {
+      button.addEventListener('focus', this.focusEventHandler.bind(this));
+    };
+
+    if (SevenMinuteTabs.direction[pressed]) {
+      var target = event.target;
+      if (target.index !== undefined) {
+        if (this.buttons[target.index + SevenMinuteTabs.direction[pressed]]) {
+          this.buttons[target.index + SevenMinuteTabs.direction[pressed]].focus();
+        }
+        else if (pressed === SevenMinuteTabs.keys.left || pressed === SevenMinuteTabs.keys.up) {
+          this.focusLastTab();
+        }
+        else if (pressed === SevenMinuteTabs.keys.right || pressed == SevenMinuteTabs.keys.down) {
+          this.focusFirstTab();
+        }
+      }
+    }
+  }
+
+  getStorageValues(tab) {
+    let [key, value] = (tab.getAttribute(SevenMinuteTabs.attrs.persistGroupKey) || "").split(":");
+    if(key && value) {
+      return [key, value];
+    }
+    if(key) {
+      return ["__global", key]
+    }
+    // let href = tab.getAttribute("href");
+    // if(href) {
+    //   return ["__global", this.getTabIdFromHref(href)];
+    // }
+    return [,];
+  }
+
+  syncRelatedTabs(activatedTab) {
+    if(!this.hasAttribute(SevenMinuteTabs.attrs.sync)) {
+      return;
+    }
+
+    let persistGroupKey = activatedTab.getAttribute(SevenMinuteTabs.attrs.persistGroupKey);
+    let tabs = Array.from(document.querySelectorAll(`[${SevenMinuteTabs.attrs.persistGroupKey}="${persistGroupKey}"]`)).filter(tab => tab !== activatedTab);
+    for(let tab of tabs) {
+      // work with `is-land--seven-minute-tabs` rename, undefined components will be set when they’re activated
+      let tabGroup = tab.closest(`[${SevenMinuteTabs.attrs.sync}]:defined`);
+      if(tabGroup) {
+        tabGroup.activateTab(tab, false, true);
+      }
+    }
+  }
+
+  // Activates any given tab panel
+  activateTab (tab, setFocus = true, viaSync = false) {
+    if(tab.getAttribute("role") !== "tab") {
+      tab = tab.closest('[role="tab"]');
+    }
+
+    if(!viaSync) {
+      this.syncRelatedTabs(tab);
+    }
+
+    // Deactivate all other tabs
+    this.deactivateTabs();
+
+    // Remove tabindex attribute
+    tab.removeAttribute('tabindex');
+
+    // Set the tab as selected
+    tab.setAttribute('aria-selected', 'true');
+
+    // Get the value of aria-controls (which is an ID)
+    var controls = tab.getAttribute('aria-controls');
+
+    // Remove hidden attribute from tab panel to make it visible
+    var panel = document.getElementById(controls);
+    if(panel) {
+      panel.removeAttribute('hidden');
+
+      if(this.persistSelection) { // panel must exist to persist
+        let obj = JSON.parse(this.storage.getItem(SevenMinuteTabs.props.groupStorageKey));
+        if(!obj) {
+          obj = {};
+        }
+
+        let [key, value] = this.getStorageValues(tab);
+        if(key && value) {
+          obj[key] = value;
+        }
+
+        this.storage.setItem(SevenMinuteTabs.props.groupStorageKey, JSON.stringify(obj));
+      }
+    }
+
+    // Set focus when required
+    if (setFocus) {
+      tab.focus();
+    }
+  }
+
+  // Deactivate all tabs and tab panels
+  deactivateTabs() {
+    for (let button of this.buttons) {
+      button.setAttribute('tabindex', '-1');
+      button.setAttribute('aria-selected', 'false');
+      button.removeEventListener('focus', this.focusEventHandler.bind(this));
+    }
+
+    for (let panel of this.panels) {
+      panel.setAttribute('hidden', 'hidden');
+    }
+  }
+
+  focusFirstTab() {
+    this.buttons[0].focus();
+  }
+
+  focusLastTab() {
+    this.buttons[this.buttons.length - 1].focus();
+  }
+
+  // Determine whether there should be a delay
+  // when user navigates with the arrow keys
+  determineDelay() {
+    var hasDelay = this.tablist.hasAttribute('data-delay');
+    var delay = 0;
+
+    if (hasDelay) {
+      var delayValue = this.tablist.getAttribute('data-delay');
+      if (delayValue) {
+        delay = delayValue;
+      }
+      else {
+        // If no value is specified, default to 300ms
+        delay = 300;
+      };
+    };
+
+    return delay;
+  }
+
+  focusEventHandler(event) {
+    var target = event.target;
+
+    setTimeout(this.checkTabFocus.bind(this), this.delay, target);
+  };
+
+  // Only activate tab on focus if it still has focus after the delay
+  checkTabFocus(target) {
+    let focused = document.activeElement;
+
+    if (target === focused) {
+      this.activateTab(target, false);
+    }
+  }
+}
+
+window.customElements.define(SevenMinuteTabs.tagName, SevenMinuteTabs);
+    </script>
+
+    <style>
+        :root {
+            --primary-color: #8282f9;
+            --secondary-color: royalblue;
+        }
+        * {
+            box-sizing: border-box;
+            font-family: 'PT Serif';
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            border-top: 0.5em solid var(--primary-color);
+        }
+        main {
+            max-width: 35em;
+            margin: auto;
+            padding: 1em;
+        }
+        h1 {
+            margin: 0;
+        }
+        nav {
+            margin-bottom: 2em;
+        }
+        .subcontent {
+            margin-top: 0.25em;
+            color: #535353;
+        }
+        a {
+            text-decoration: none;
+            color: black;
+        }
+        nav a {
+            text-decoration: underline;
+        }
+        a:hover {
+            text-decoration: none;
+            color: var(--primary-color);
+        }
+        a:focus {
+            outline: 2px solid var(--primary-color);
+        }
+        .mascot {
+            float: right;
+            max-height: 3.5em;
+        }
+        .focused {
+            color: var(--primary-color);
+            font-weight: bold;
+        }
+        nav ul {
+            margin-top: 0;
+            display: flex;
+        }
+        nav ul li {
+            margin-right: 1em;
+        }
+        @media screen and (max-width: 600px) {
+            nav ul {
+                flex-direction: column;
+            }
+            nav ul li {
+                margin-right: 0;
+                margin-bottom: 0.5em;
+            }
+            h1 {
+                font-size: 1.5em;
+            }
+            h3 {
+                font-size: 1em;
+            }
+        }
+        textarea {
+            display: block;
+            width: 100%;
+        }
+        input {
+            width: 100%;
+        }
+        input[type="submit"] {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0.5em 1em;
+            margin-top: 1em;
+            cursor: pointer;
+            width: 100%;
+        }
+        label {
+            display: block;
+            margin-top: 1em;
+            font-weight: bold;
+        }
+        dt {
+            font-weight: bold;
+        }
+        details {
+            background-color: #f9f9f9;
+            border-radius: 0.5em;
+            margin-bottom: 1em;
+            padding: 0.5em;
+        }
+        ol {
+            list-style: none;
+            padding: 0;
+            display: flex;
+        }
+        ol li {
+            margin-right: 1em;
+        }
+        ol li a {
+            color: white;
+            padding: 0.5em;
+            background-color: var(--primary-color);
+        }
+        ol li a:hover {
+            background-color: var(--secondary-color);
+            color: white;
+        }
+        ol li a[aria-selected="true"] {
+            background-color: var(--secondary-color);
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <a href="https://jamesg.blog"><img src="https://jamesg.blog/assets/mascot.svg" class="mascot" /></a>
+        <h1>Pattern Matching</h1>
+        <p>Type a list of text values below to find patterns.</p>
+        <script>
+            document.addEventListener("DOMContentLoaded", function() {
+                const tab = "{{ tab }}";
+                const tabs = document.querySelector("seven-minute-tabs");
+                if(tab === "run") {
+                    tabs.activateTab(document.querySelector('[href="#run"]'), false);
+                } else {
+                    tabs.activateTab(document.querySelector('[href="#calculate"]'), false);
+                }
+            });
+        </script>
+        <seven-minute-tabs>
+			<ol role="tablist" aria-label="What does this tab chooser do?">
+				<li><a href="#calculate" role="tab">Find pattern</a></li>
+				<li><a href="#run" role="tab">Test pattern</a></li>
+			</ol>
+
+			<div id="calculate" role="tabpanel">
+                <form method="post">
+                    <label for="data">Data (max 5000 rows)</label>
+                    <textarea rows="10" name="data" id="data" placeholder="row1
+row2">{{ data }}</textarea>
+                    <label for="delimiter">Delimiter (set to space character by default)</label>
+                    <input type="text" name="delimiter" id="delimiter" placeholder="Delimiter" value=" " /><br>
+                    <input type="submit" value="Find Pattern" />
+                </form>
+			</div>
+			<div id="run" role="tabpanel">
+                <form method="post">
+                    <label for="data">Data (max 5000 rows)</label>
+                    <textarea rows="10" name="data1" id="data1" placeholder="row1
+row2">{{ data }}</textarea>
+                    <label for="delimiter">Delimiter</label>
+                    <input type="text" name="delimiter"  placeholder="Delimiter" value=" " /><br>
+                    <label for="delimiter">Pattern</label>
+                    <input type="text" name="pattern" id="pattern" placeholder="^How to make (coffee|tea)" value="{{ pattern }}" /><br>
+                    <input type="submit" value="Test Pattern" />
+                </form>
+			</div>
+			<div id="third-tab" role="tabpanel">
+				Third tab content
+			</div>
+		</seven-minute-tabs>
+        {% if pattern %}
+            <h2>Output</h2>
+            <ul>
+                <li><b>Pattern</b>: {{ pattern }}</li>
+                <li><b>Match rate</b>: {{ match_rate }}%</li>
+            </ul>
+            {% if fails %}
+            <h3>Fails</h3>
+            <p>Below are the values that do not match the pattern.</p>
+            <ul>
+                {% for value in fails %}
+                    <li>{{ value }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            <h3>Valid values for each substitution</h3>
+            <p>Below are the values that can go in each place.</p>
+            {% for substitution in results %}
+                <details>
+                    <summary>{{ substitution }}</summary>
+                    <ul>
+                        {% for value in results[substitution] %}
+                            <li>{{ value }}</li>
+                        {% endfor %}
+                    </ul>
+                </details>
+            {% endfor %}
+        {% endif %}
+    </main>
+</body>
+</html>
