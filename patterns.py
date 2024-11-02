@@ -4,6 +4,12 @@ from collections import defaultdict, Counter, OrderedDict
 SUBPATH = "train"
 DELIMITER = "-"
 
+def longest_common_starting_substring(s1, s2):
+    for i, (c1, c2) in enumerate(zip(s1, s2)):
+        if c1 != c2:
+            return s1[:i]
+    return s1[:i + 1]
+
 def get_patterns(examples, delimiter = "-"):
     url_components = [r.split(delimiter) for r in examples]
 
@@ -68,6 +74,58 @@ def get_patterns(examples, delimiter = "-"):
             iters += 1
             continue
 
+        triggered_regex = False
+
+        for i, item in enumerate(pattern):
+            if "*" in item:
+                triggered_regex = True
+                start = longest_common_starting_substring(url_components[0][i], url_components[1][i])
+
+                pattern[i] = ""
+                # if all in url components at idx are same length, add {n} to end
+                component_lens = set(map(len, [url[i] for url in url_components]))
+                # if all values are a-z
+                matcher = ""
+                # min is smallest in a-z order, max is largest
+                # get min leter after start
+                min_char_after_start = min(url_components[0][i][len(start):])
+                max_char_after_start = max(url_components[1][i][len(start):])
+                any_contains_caps = any(c.isupper() for c in url_components[0][i][len(start):]) or any(c.isupper() for c in url_components[1][i][len(start):])
+                any_contains_lower = any(c.islower() for c in url_components[0][i][len(start):]) or any(c.islower() for c in url_components[1][i][len(start):])
+
+                if min_char_after_start.isdigit() or max_char_after_start.isdigit():
+                    smallest_num = min([int(c) for c in url_components[0][i][len(start):] if c.isdigit()])
+                    largest_num = max([int(c) for c in url_components[1][i][len(start):] if c.isdigit()])
+                    matcher = f"{smallest_num}-{largest_num}"
+
+                if any_contains_caps:
+                    matcher += "A-Z"
+                if any_contains_lower:
+                    matcher += "a-z"
+                    matcher = f"[{matcher}]"
+                pattern[i] += matcher
+
+                min_component_len = min(component_lens)
+                max_component_len = max(component_lens)
+
+                if min_component_len == max_component_len:
+                    pattern[i] += "{" + f"{min_component_len}" + "}"
+                else:
+                    pattern[i] += "{" + f"{min_component_len},{max_component_len}" + "}"
+
+                # get count of all values at i
+                count = Counter([url_components[x][i] for x in range(len(url_components))])
+
+                # if are < 3 combinations, make (a|b|c) instead
+                if len(count) < 3:
+                    pattern[i] = "(" + "|".join(count.keys()) + ")"
+                else:
+                    pattern[i] = "(" + pattern[i] + ")"
+
+        if triggered_regex:
+            pattern[0] = "^" + pattern[0]
+            pattern[-1] += "$"
+
         # if long sequence of * is found, remove, and string is not length of longest
         if len(pattern) > 1 and not all_url_same_len:
             for i in range(len(pattern) - 1):
@@ -84,9 +142,10 @@ def get_patterns(examples, delimiter = "-"):
     return candidates
 
 def calculate_matches_from_examples(pattern, examples, delimiter = "-"):
-    pattern = delimiter.join([f"{word}" if word != "*" else "(.*)" for word in pattern]).strip()
-
+    pattern = delimiter.join(pattern)
+    print(pattern)
     pattern = re.compile(pattern)
+
     matches = 0
 
     values_by_wildcard_idx = defaultdict(lambda: defaultdict(int))
@@ -98,14 +157,5 @@ def calculate_matches_from_examples(pattern, examples, delimiter = "-"):
             for i, group in enumerate(match.groups()):
                 values_by_wildcard_idx[i][group] += 1
             matches += 1
-
-    value_types_by_wildcard_idx = defaultdict(set)
-
-    for i, values in values_by_wildcard_idx.items():
-        for value in values:
-            if value.isdigit():
-                value_types_by_wildcard_idx[i].add(int)
-            else:
-                value_types_by_wildcard_idx[i].add(type(value))
 
     return matches, values_by_wildcard_idx
